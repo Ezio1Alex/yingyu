@@ -4,6 +4,7 @@ import { useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useAppStore } from '../stores/appStore'
 import { api } from '../api/client'
 import { useToast } from '../utils/toast'
+import { pendingStore } from '../utils/pendingStore'
 import { chance } from '../utils/format'
 import { DEFAULTS } from '../utils/constants'
 import AppHeader from '../components/common/AppHeader.vue'
@@ -29,9 +30,13 @@ const roundCorrect = ref(0) // 本轮答对数
 const showTyping = ref(false)
 const isRated = ref(false)
 
-// 批量提交缓冲
+// 批量提交缓冲（失败滞留 localStorage；提交成功即清空删除）
 let pendingRatings = []
 let pendingTypings = []
+
+function syncPending() {
+  pendingStore.save(store.user.id, 'review', { ratings: pendingRatings, typings: pendingTypings })
+}
 
 async function flushPending() {
   if (!pendingRatings.length && !pendingTypings.length) return
@@ -42,6 +47,7 @@ async function flushPending() {
     // 成功才移除已提交的；失败保留，下一个触发点自动重试
     pendingRatings.splice(0, ratings.length)
     pendingTypings.splice(0, typings.length)
+    syncPending()
   } catch { /* 后端幂等，重试安全 */ }
 }
 
@@ -50,7 +56,18 @@ onBeforeRouteLeave(async () => {
   await flushPending()
 })
 
-onMounted(async () => { await loadRound() })
+onMounted(async () => {
+  // 恢复上次未提交的复习缓冲并补交（网络失败/刷新/退出后的保险）
+  const uid = store.user?.id
+  if (!uid) { router.push('/'); return }
+  const saved = pendingStore.load(uid, 'review')
+  if (saved) {
+    pendingRatings = saved.ratings || []
+    pendingTypings = saved.typings || []
+    await flushPending()
+  }
+  await loadRound()
+})
 
 async function loadRound() {
   const uid = store.user?.id
@@ -87,6 +104,7 @@ function handleRate(score) {
   // 只有首轮评分提交后端；二轮起纯本地练习，不写任何数据
   if (round.value === 1) {
     pendingRatings.push({ word_id: currentWord.value.id, score })
+    syncPending()
     // 每 20 词提交一次，防中途关闭丢进度
     if (pendingRatings.length >= 20) flushPending()
   }
@@ -99,6 +117,7 @@ function handleTypingSubmit(correct) {
   // 拼写结果同样只在首轮提交
   if (round.value === 1) {
     pendingTypings.push({ word_id: currentWord.value.id, correct })
+    syncPending()
   }
 }
 

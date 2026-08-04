@@ -5,6 +5,7 @@ import { useAppStore } from '../stores/appStore'
 import { useBankStore } from '../stores/bankStore'
 import { api } from '../api/client'
 import { useToast } from '../utils/toast'
+import { pendingStore } from '../utils/pendingStore'
 import AppHeader from '../components/common/AppHeader.vue'
 import CardLearn from '../components/learn/CardLearn.vue'
 
@@ -23,6 +24,11 @@ let batchIds = [] // 待批量提交的新词 id
 
 const currentWord = computed(() => words.value[currentIndex.value] || {})
 
+// 缓冲同步到 localStorage（提交成功才清空；失败滞留，刷新/退出也能恢复补交）
+function syncLearned() {
+  pendingStore.save(store.user.id, 'learn', batchIds)
+}
+
 async function flushLearned() {
   if (!batchIds.length) return
   const ids = [...batchIds]
@@ -30,6 +36,7 @@ async function flushLearned() {
     await api.submitLearnBatch({ user_id: store.user.id, word_ids: ids })
     // 成功才移除；失败保留，下个触发点自动重试（后端会跳过已学过的词，重试安全）
     batchIds.splice(0, ids.length)
+    syncLearned()
     bankStore.markLearned(ids)
   } catch {}
 }
@@ -51,6 +58,9 @@ onBeforeRouteLeave(async () => {
 onMounted(async () => {
   const uid = store.user?.id
   if (!uid) { router.push('/'); return }
+  // 恢复上次未提交的新词缓冲并补交（网络失败/退出/刷新后的保险）
+  batchIds = pendingStore.load(uid, 'learn') || []
+  await flushLearned()
   const dailyGoal = store.user?.words_per_day || 20
 
   // 优先用首页路由带来的 todayNew，避免重复调 /home（达标时即可 0 查询）
@@ -104,6 +114,7 @@ onMounted(async () => {
 async function next() {
   const w = words.value[currentIndex.value]
   batchIds.push(w.id)
+  syncLearned()
 
   if (currentIndex.value < words.value.length - 1) {
     currentIndex.value++
