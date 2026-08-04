@@ -151,6 +151,39 @@ async function doReinforce(wordId) {
   } catch (e) { toast('操作失败', 'error') }
 }
 
+// 删除当前选中的孩子及其全部数据（级联清除，不可恢复）
+const deleting = ref(false)
+
+function deleteSelected() {
+  const u = users.value.find(x => x.id === selectedUserId.value)
+  if (!u) return
+  if (!window.confirm(`确定删除孩子「${u.name}」吗？\n将同时清除其全部学习数据（进度、复习记录、收藏、抽查历史），此操作不可恢复。`)) return
+  doDeleteUser(u)
+}
+
+async function doDeleteUser(u) {
+  deleting.value = true
+  try {
+    await api.deleteUser(u.id)
+    users.value = await api.getUsers()
+    // 若删除的是当前选中，切到剩余第一个
+    if (selectedUserId.value === u.id) {
+      selectedUserId.value = users.value[0]?.id || ''
+      if (selectedUserId.value) { await loadData() }
+      else {
+        stats.value = null
+        weakWords.value = []
+        history.value = []
+        monthData.value = { year: 0, month: 0, days: [] }
+      }
+    }
+    // 若删除的是当前登录用户，本地会话同步登出
+    if (store.user?.id === u.id) store.logout()
+    toast('已删除孩子')
+  } catch (e) { toast('删除失败: ' + e.message, 'error')
+  } finally { deleting.value = false }
+}
+
 function closeSpotCheck() {
   spotCheckActive.value = false; spotCheckDone.value = false
   spotCheckResult.value = null; loadData()
@@ -171,11 +204,17 @@ function getResult(wordId) {
 
     <!-- 选择孩子 -->
     <div class="bg-white rounded-xl p-4 shadow-sm mb-4">
-      <select v-model="selectedUserId" @change="loadData"
-        class="w-full p-2 rounded-lg border border-gray-200 text-gray-700"
-      >
-        <option v-for="u in users" :key="u.id" :value="u.id">{{ u.name }} · {{ u.grade }}</option>
-      </select>
+      <div class="flex gap-2 items-center">
+        <select v-model="selectedUserId" @change="loadData"
+          class="flex-1 p-2 rounded-lg border border-gray-200 text-gray-700"
+        >
+          <option v-for="u in users" :key="u.id" :value="u.id">{{ u.name }} · {{ u.grade }}</option>
+        </select>
+        <button @click="deleteSelected" :disabled="!selectedUserId || deleting"
+          class="px-3 py-2 rounded-lg bg-red-50 text-red-500 text-sm font-medium hover:bg-red-100 transition disabled:opacity-40 whitespace-nowrap"
+          title="删除当前选中的孩子及其全部数据（不可恢复）"
+        >🗑 删除</button>
+      </div>
     </div>
 
     <!-- 非抽查状态：看板 -->

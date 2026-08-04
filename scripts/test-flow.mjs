@@ -218,6 +218,26 @@ console.log('\n--- 词库全量查询 ---')
   ok(words.every(w => typeof w.bookmarked === 'number'), `每条都有 bookmarked`)
 }
 
+console.log('\n--- 删除用户（级联清数据，不留垃圾）---')
+{
+  await Q.createUser(env, { id: 'u2', name: '小红', grade: '初中' })
+  const words = await Q.getNewWords(env, 'u2', 3)
+  await Q.addNewWords(env, 'u2', words.map(w => w.id))
+  const wordId = words[0].id
+  await Q.addBookmark(env, 'u2', wordId)
+  await Q.submitSpotCheckResult(env, 'u2', [{ word_id: wordId, result: 1, category: '待复习' }])
+
+  await Q.deleteUser(env, 'u2')
+  ok(db.prepare("SELECT COUNT(*) c FROM users WHERE id='u2'").get().c === 0, `users 表已删 u2`)
+  ok(db.prepare("SELECT COUNT(*) c FROM word_learning WHERE user_id='u2'").get().c === 0, `word_learning 已清`)
+  ok(db.prepare("SELECT COUNT(*) c FROM review_log WHERE user_id='u2'").get().c === 0, `review_log 已清`)
+  ok(db.prepare("SELECT COUNT(*) c FROM bookmarks WHERE user_id='u2'").get().c === 0, `bookmarks 已清`)
+  ok(db.prepare("SELECT COUNT(*) c FROM spot_checks WHERE user_id='u2'").get().c === 0, `spot_checks 已清`)
+  const orphan = db.prepare('SELECT COUNT(*) c FROM spot_check_items WHERE check_id NOT IN (SELECT id FROM spot_checks)').get().c
+  ok(orphan === 0, `spot_check_items 无孤儿（级联删除）`)
+  ok(db.prepare("SELECT COUNT(*) c FROM users WHERE id='u1'").get().c === 1, `u1 不受影响`)
+}
+
 // 清理
 db.close()
 rmSync(dir, { recursive: true, force: true })

@@ -15,6 +15,20 @@ export async function updateUserBank(env, userId, bankId) {
   return { ok: true }
 }
 
+// 删除用户并级联清除其全部数据（不留垃圾），一次 batch 原子执行
+// spot_check_items 无 user_id，通过该用户的 spot_checks 关联删除
+export async function deleteUser(env, userId) {
+  await DB(env).batch([
+    DB(env).prepare(`DELETE FROM spot_check_items WHERE check_id IN (SELECT id FROM spot_checks WHERE user_id = ?)`).bind(userId),
+    DB(env).prepare('DELETE FROM spot_checks WHERE user_id = ?').bind(userId),
+    DB(env).prepare('DELETE FROM bookmarks WHERE user_id = ?').bind(userId),
+    DB(env).prepare('DELETE FROM review_log WHERE user_id = ?').bind(userId),
+    DB(env).prepare('DELETE FROM word_learning WHERE user_id = ?').bind(userId),
+    DB(env).prepare('DELETE FROM users WHERE id = ?').bind(userId),
+  ])
+  return { ok: true }
+}
+
 // ===== 今日复习 =====
 // 第一轮：未评分的到期词；若没有则回退到今天已复习的词（支持当天二轮）
 // 第二轮起：到期词 + 今天已复习过的词（重复复习只记日志不重算 SM2）

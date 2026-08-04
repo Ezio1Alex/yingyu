@@ -117,6 +117,7 @@ async function route(method, path, query, body) {
     const id = body.name.trim().toLowerCase().replace(/\s+/g, '_') + '_' + Date.now()
     return json(await Q.createUser(env, { id, name: body.name, grade: body.grade || '高中' }))
   }
+  if (path === '/api/users' && method === 'DELETE') return json(await Q.deleteUser(env, body.user_id))
   if (path === '/api/users/bank' && method === 'PUT') return json(await Q.updateUserBank(env, body.user_id, body.bank_id))
   if (path === '/api/today' && method === 'GET' && uid(query)) { const round = parseInt(query.round || '1'); const words = await Q.getTodayWords(env, uid(query), round); return json({ words, total: words.length }) }
   if (path === '/api/review/new' && method === 'GET' && uid(query)) { const words = await Q.getTodayNewWords(env, uid(query)); return json({ words, total: words.length }) }

@@ -16,6 +16,7 @@ export const api = {
   // 用户
   getUsers: () => request('/users'),
   createUser: (data) => request('/users', { method: 'POST', body: JSON.stringify(data) }),
+  deleteUser: (userId) => request('/users', { method: 'DELETE', body: JSON.stringify({ user_id: userId }) }),
   updateUserBank: (data) => request('/users/bank', { method: 'PUT', body: JSON.stringify(data) }),
 
   // 今日复习

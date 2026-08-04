@@ -12,5 +12,10 @@ export async function onRequest(context) {
     const user = await Q.createUser(env, { id, name, grade })
     return Response.json(user)
   }
+  if (request.method === 'DELETE') {
+    const { user_id } = await request.json()
+    if (!user_id) return Response.json({ error: 'user_id required' }, { status: 400 })
+    return Response.json(await Q.deleteUser(env, user_id))
+  }
   return new Response(null, { status: 405 })
 }
