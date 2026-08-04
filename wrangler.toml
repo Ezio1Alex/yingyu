@@ -1,0 +1,8 @@
+name = "yingyu"
+compatibility_date = "2026-04-13"
+pages_build_output_dir = "dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "vocab-db"
+database_id = "13a2ecf4-6f3c-48dc-b7f0-a7439944e755"

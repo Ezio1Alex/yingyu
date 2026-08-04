@@ -1,0 +1,31 @@
+{
+  "name": "yingyu",
+  "private": true,
+  "version": "1.0.0",
+  "description": "智能英语背单词工具 - SM-2 间隔重复算法 - 家长督导端",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:api": "node scripts/dev-api.mjs",
+    "build": "vite build",
+    "preview": "vite preview",
+    "deploy": "vite build && npx wrangler pages deploy ./dist",
+    "db:init": "npx wrangler d1 execute vocab-db --local --file=functions/_db/schema.sql",
+    "db:seed": "node scripts/seed-local.js",
+    "convert": "python scripts/convert_words.py",
+    "convert:vocab": "python3 scripts/convert_vocab.py",
+    "setup": "bash scripts/setup-local.sh"
+  },
+  "dependencies": {
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0",
+    "pinia": "^4.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@vitejs/plugin-vue": "^5.2.0",
+    "hono": "^4.7.0",
+    "tailwindcss": "^4.0.0",
+    "vite": "^6.0.0"
+  }
+}
