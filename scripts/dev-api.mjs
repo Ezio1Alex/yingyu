@@ -114,6 +114,7 @@ async function route(method, path, query, body) {
 
   if (path === '/api/users' && method === 'GET') return json(await Q.getUsers(env))
   if (path === '/api/users' && method === 'POST') {
+    if (String(body.pin || '') !== String(env.PARENT_PIN)) return json({ error: 'PIN 码错误' }, 403)
     const id = body.name.trim().toLowerCase().replace(/\s+/g, '_') + '_' + Date.now()
     return json(await Q.createUser(env, { id, name: body.name, grade: body.grade || '高中' }))
   }

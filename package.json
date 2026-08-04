@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "dev:api": "node scripts/dev-api.mjs",
-    "build": "vite build",
+    "build": "vite build && node scripts/build-404.mjs",
     "preview": "vite preview",
     "deploy": "vite build && npx wrangler pages deploy ./dist",
     "db:init": "npx wrangler d1 execute vocab-db --local --file=functions/_db/schema.sql",

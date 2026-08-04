@@ -11,6 +11,7 @@ const { show: toast } = useToast()
 
 const name = ref('')
 const grade = ref('高中')
+const pin = ref('') // 家长 PIN（创建用户需家长确认）
 const users = ref([])
 const showCreate = ref(false)
 const loading = ref(true)
@@ -34,7 +35,7 @@ function selectUser(u) {
 async function createUser() {
   if (!name.value.trim()) return
   try {
-    const u = await api.createUser({ name: name.value.trim(), grade: grade.value })
+    const u = await api.createUser({ name: name.value.trim(), grade: grade.value, pin: pin.value })
     store.setUser(u)
     router.push('/home')
   } catch (e) {
@@ -85,6 +86,16 @@ async function createUser() {
 
       <!-- 创建新用户 -->
       <div v-else class="space-y-4">
+        <p class="text-xs text-gray-400">创建新学习者需家长 PIN 确认</p>
+        <div>
+          <label class="block text-sm font-medium text-gray-600 mb-1">家长 PIN</label>
+          <input
+            v-model="pin"
+            type="password"
+            placeholder="请输入家长 PIN 码"
+            class="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 outline-none transition tracking-widest"
+          />
+        </div>
         <div>
           <label class="block text-sm font-medium text-gray-600 mb-1">你的名字</label>
           <input
@@ -112,7 +123,7 @@ async function createUser() {
         <button
           @click="createUser"
           class="w-full py-3 bg-indigo-500 text-white rounded-xl font-medium hover:bg-indigo-600 transition disabled:opacity-50"
-          :disabled="!name.trim()"
+          :disabled="!name.trim() || !pin.trim()"
         >✅ 开始学习</button>
       </div>
     </div>
