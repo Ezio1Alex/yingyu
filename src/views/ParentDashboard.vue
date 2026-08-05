@@ -18,6 +18,14 @@ if (!store.pinVerified) { router.push('/parent') }
 
 const users = ref([])
 const selectedUserId = ref('')
+const showUserMenu = ref(false) // 自定义用户下拉是否展开（原生 select 展开面板无法改样式，故自绘）
+const selectedUserName = computed(() => users.value.find(u => u.id === selectedUserId.value)?.name || '选择孩子')
+
+function selectUser(u) {
+  selectedUserId.value = u.id
+  showUserMenu.value = false
+  loadData()
+}
 const stats = ref(null)
 const weakWords = ref([])
 const history = ref([])
@@ -243,12 +251,20 @@ function getResult(wordId) {
     <div class="bg-white rounded-xl p-4 shadow-sm mb-4">
       <div class="flex gap-2 items-center">
         <div class="relative flex-1">
-          <select v-model="selectedUserId" @change="loadData"
-            class="w-full appearance-none p-2.5 pr-9 rounded-xl border border-gray-200 bg-white text-gray-700 text-sm shadow-sm transition focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400"
+          <button @click="showUserMenu = !showUserMenu" type="button"
+            class="w-full flex items-center justify-between p-2.5 pr-3 rounded-xl border border-gray-200 bg-white text-gray-700 text-sm shadow-sm transition focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400"
           >
-            <option v-for="u in users" :key="u.id" :value="u.id">{{ u.name }} · {{ u.grade }}</option>
-          </select>
-          <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs">▾</span>
+            <span class="truncate">{{ selectedUserName }}</span>
+            <span class="text-gray-400 text-xs transition-transform duration-200 shrink-0" :class="showUserMenu ? 'rotate-180' : ''">▾</span>
+          </button>
+          <div v-if="showUserMenu"
+            class="absolute z-20 left-0 right-0 top-full mt-1.5 bg-white rounded-xl shadow-lg border border-gray-100 py-1 max-h-56 overflow-y-auto"
+          >
+            <button v-for="u in users" :key="u.id" type="button" @click="selectUser(u)"
+              class="w-full px-3 py-2.5 text-left text-sm transition"
+              :class="u.id === selectedUserId ? 'bg-indigo-50 text-indigo-600 font-medium' : 'text-gray-700 hover:bg-gray-50'"
+            >{{ u.name }} · {{ u.grade }}</button>
+          </div>
         </div>
         <button @click="deleteSelected" :disabled="!selectedUserId || deleting"
           class="px-3 py-2.5 rounded-xl bg-red-50 text-red-500 text-sm font-medium hover:bg-red-100 transition disabled:opacity-40 whitespace-nowrap"
