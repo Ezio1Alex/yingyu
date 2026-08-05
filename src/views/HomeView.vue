@@ -27,35 +27,46 @@ const remainingNew = computed(() => {
 })
 const newWordsDone = computed(() => remainingNew.value === 0 || !bankHasMore.value)
 
-// 首页当天缓存：SPA 内切回秒开（先用缓存渲染，后台静默刷新），避免"今日新学回顾"等框闪跳
-let homeCache = { uid: null, date: '', stats: null, reviewCount: 0, bankHasMore: true }
+// 首页数据 localStorage 缓存（当天有效）：刷新/切回都立即渲染（今日新学回顾框不闪跳），后台静默刷新
+const HOME_CACHE_KEY = 'home_cache_'
 function todayStr() {
   const d = new Date()
   const utc8 = new Date(d.getTime() + 8 * 3600 * 1000)
   return utc8.toISOString().slice(0, 10)
 }
+function readHomeCache(uid) {
+  try {
+    const raw = localStorage.getItem(HOME_CACHE_KEY + uid)
+    if (!raw) return null
+    const c = JSON.parse(raw)
+    return c.date === todayStr() ? c : null
+  } catch { return null }
+}
+function writeHomeCache(uid, data) {
+  try { localStorage.setItem(HOME_CACHE_KEY + uid, JSON.stringify({ date: todayStr(), ...data })) } catch {}
+}
 
-async function loadHome(useCache) {
+async function loadHome() {
   const uid = store.user?.id
   if (!uid) { router.push('/'); return }
-  const today = todayStr()
-  const hit = useCache && homeCache.uid === uid && homeCache.date === today && homeCache.stats
-  if (hit) {
-    // 先用缓存渲染（含今日新学回顾框），再后台静默刷新
-    stats.value = homeCache.stats
-    reviewCount.value = homeCache.reviewCount
-    bankHasMore.value = homeCache.bankHasMore
+  // 先读本地缓存立即渲染，避免"等数据 → 框闪现"
+  const cached = readHomeCache(uid)
+  if (cached) {
+    stats.value = cached.stats
+    reviewCount.value = cached.reviewCount
+    bankHasMore.value = cached.bankHasMore
   }
   try {
     const data = await api.getHome(uid)
-    homeCache = { uid, date: today, stats: data.stats || {}, reviewCount: data.dueToday || 0, bankHasMore: (data.remainingNew ?? 0) > 0 }
-    stats.value = homeCache.stats
-    reviewCount.value = homeCache.reviewCount
-    bankHasMore.value = homeCache.bankHasMore
+    const val = { stats: data.stats || {}, reviewCount: data.dueToday || 0, bankHasMore: (data.remainingNew ?? 0) > 0 }
+    writeHomeCache(uid, val)
+    stats.value = val.stats
+    reviewCount.value = val.reviewCount
+    bankHasMore.value = val.bankHasMore
   } catch {}
 }
 
-onMounted(() => { loadHome(true) })
+onMounted(() => { loadHome() })
 </script>
 
 <template>

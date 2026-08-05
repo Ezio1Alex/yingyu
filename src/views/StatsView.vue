@@ -25,33 +25,44 @@ const totalWeek = computed(() => weekData.value.reduce((s, d) => s + d.count, 0)
 // 本周有学习的天数（打卡）
 const weekActiveDays = computed(() => weekData.value.filter(d => d.count > 0).length)
 
-// 统计页当天缓存：同一天内切回秒开（先用缓存渲染，后台静默刷新），避免每次进入都等网络
-let summaryCache = { uid: null, date: '', stats: null, weeks: null }
+// 统计页数据 localStorage 缓存（当天有效）：刷新/切回都立即渲染（柱状图不闪跳），后台静默刷新
+const SUMMARY_CACHE_KEY = 'summary_cache_'
 function todayStr() {
   const d = new Date()
   const utc8 = new Date(d.getTime() + 8 * 3600 * 1000)
   return utc8.toISOString().slice(0, 10)
 }
+function readSummaryCache(uid) {
+  try {
+    const raw = localStorage.getItem(SUMMARY_CACHE_KEY + uid)
+    if (!raw) return null
+    const c = JSON.parse(raw)
+    return c.date === todayStr() ? c : null
+  } catch { return null }
+}
+function writeSummaryCache(uid, data) {
+  try { localStorage.setItem(SUMMARY_CACHE_KEY + uid, JSON.stringify({ date: todayStr(), ...data })) } catch {}
+}
 
-async function load(useCache) {
+async function load() {
   const uid = store.user?.id
   if (!uid) { router.push('/'); return }
-  const today = todayStr()
-  const hit = useCache && summaryCache.uid === uid && summaryCache.date === today && summaryCache.stats
-  if (hit) {
-    // 先用缓存渲染，再后台静默刷新保证最新
-    stats.value = summaryCache.stats
-    weeks.value = summaryCache.weeks
+  // 先读本地缓存立即渲染，避免"等数据 → 柱状图闪现"
+  const cached = readSummaryCache(uid)
+  if (cached) {
+    stats.value = cached.stats
+    weeks.value = cached.weeks
   }
   try {
     const data = await api.getStatsSummary(uid)
-    summaryCache = { uid, date: today, stats: data.stats || {}, weeks: data.weeks || [] }
-    stats.value = summaryCache.stats
-    weeks.value = summaryCache.weeks
+    const val = { stats: data.stats || {}, weeks: data.weeks || [] }
+    writeSummaryCache(uid, val)
+    stats.value = val.stats
+    weeks.value = val.weeks
   } catch {}
 }
 
-onMounted(() => { load(true) })
+onMounted(() => { load() })
 </script>
 
 <template>
@@ -82,20 +93,25 @@ onMounted(() => { load(true) })
       </div>
       <div class="text-xs text-gray-400 mb-4">本周共学 {{ totalWeek }} 词</div>
 
-      <!-- 周趋势柱状图 -->
-      <div v-if="weekData.length > 0" class="pt-4 border-t border-gray-100">
+      <!-- 周趋势柱状图（容器常驻，数据未到显示骨架灰条，避免空→图突然出现） -->
+      <div class="pt-4 border-t border-gray-100">
         <div class="text-sm text-gray-500 mb-4">📈 {{ weekLabels[currentIdx] }}趋势</div>
         <div class="flex items-end gap-2 h-28">
-          <div v-for="d in weekData" :key="d.date" class="flex-1 flex flex-col items-center gap-1">
-            <!-- 数字标记 -->
-            <div class="text-xs font-medium" :class="d.count > 0 ? 'text-indigo-600' : 'text-gray-300'">{{ d.count }}</div>
-            <!-- 柱（今天加高亮圈） -->
-            <div class="w-full rounded-t-md transition-all duration-200 flex items-end justify-center"
-              :class="[d.count > 0 ? 'bg-indigo-500' : 'bg-indigo-100', d.isToday ? 'ring-2 ring-indigo-400 ring-offset-1' : '']"
-              :style="{ height: Math.max(4, (d.count / maxCount) * 80) + 'px' }"
-            ></div>
-            <div class="text-xs" :class="d.isToday ? 'text-indigo-600 font-medium' : 'text-gray-400'">{{ d.label }}</div>
-          </div>
+          <template v-if="weekData.length > 0">
+            <div v-for="d in weekData" :key="d.date" class="flex-1 flex flex-col items-center gap-1">
+              <!-- 数字标记 -->
+              <div class="text-xs font-medium" :class="d.count > 0 ? 'text-indigo-600' : 'text-gray-300'">{{ d.count }}</div>
+              <!-- 柱（今天加高亮圈） -->
+              <div class="w-full rounded-t-md transition-all duration-200 flex items-end justify-center"
+                :class="[d.count > 0 ? 'bg-indigo-500' : 'bg-indigo-100', d.isToday ? 'ring-2 ring-indigo-400 ring-offset-1' : '']"
+                :style="{ height: Math.max(4, (d.count / maxCount) * 80) + 'px' }"
+              ></div>
+              <div class="text-xs" :class="d.isToday ? 'text-indigo-600 font-medium' : 'text-gray-400'">{{ d.label }}</div>
+            </div>
+          </template>
+          <template v-else>
+            <div v-for="i in 7" :key="i" class="flex-1 h-10 bg-gray-100 rounded-t-md animate-pulse"></div>
+          </template>
         </div>
       </div>
     </div>
