@@ -15,6 +15,7 @@ const pin = ref('') // 家长 PIN（创建用户需家长确认）
 const users = ref([])
 const showCreate = ref(false)
 const loading = ref(true)
+const creating = ref(false) // 防双击/网络重试重复创建用户
 
 onMounted(async () => {
   try {
@@ -33,13 +34,15 @@ function selectUser(u) {
 }
 
 async function createUser() {
-  if (!name.value.trim()) return
+  if (!name.value.trim() || !pin.value.trim() || creating.value) return
+  creating.value = true
   try {
     const u = await api.createUser({ name: name.value.trim(), grade: grade.value, pin: pin.value })
     store.setUser(u)
     router.push('/home')
   } catch (e) {
     toast('创建失败: ' + e.message, 'error')
+    creating.value = false // 失败允许重试
   }
 }
 </script>

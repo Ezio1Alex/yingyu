@@ -120,8 +120,8 @@ export async function submitReviews(env, userId, items = [], typings = []) {
     const correct = score >= 3 ? 1 : 0
 
     if (reviewedToday.has(wid)) {
-      // 今天已评分过，只记录不更新 SM2
-      stmts.push(DB(env).prepare(`INSERT INTO review_log (user_id, word_id, stage, type, score, correct, reviewed_at) VALUES (?, ?, ?, 'recall', ?, ?, ?)`).bind(userId, wid, stage, score, correct, now))
+      // 今天已评分过（网络重试/重复提交）：直接跳过，不更新 SM2 也不重复记日志
+      // （否则 review_log 会因重试膨胀，薄弱词汇错误计数被重复累加）
       results.push({ word_id: wid, skipped: true })
       continue
     }

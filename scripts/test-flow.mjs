@@ -125,6 +125,9 @@ console.log('\n--- 批量复习 submitReviews ---')
   ok(skip[0].skipped === true, `round2 重复 → skipped=true`)
   const w1b = db.prepare('SELECT * FROM word_learning WHERE user_id=? AND word_id=?').get('u1', w1)
   ok(w1b.reps === r1.reps && w1b.gap === r1.gap && w1b.stage === r1.stage, `SM2 状态未变`)
+  // 修复：重复提交不再重复记日志（网络重试不会膨胀薄弱词汇错误计数）
+  const recallCnt = db.prepare("SELECT COUNT(*) c FROM review_log WHERE user_id='u1' AND type='recall'").get().c
+  ok(recallCnt === 2, `重复提交不重复记 recall 日志, 实际 ${recallCnt}`)
 
   // 当天二轮复习：首轮无未评分到期词时回退到今天已复习过的词
   const fallback = await Q.getTodayWords(env, 'u1', 1)
