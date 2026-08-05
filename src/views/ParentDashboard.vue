@@ -242,13 +242,16 @@ function getResult(wordId) {
     <!-- 选择孩子 -->
     <div class="bg-white rounded-xl p-4 shadow-sm mb-4">
       <div class="flex gap-2 items-center">
-        <select v-model="selectedUserId" @change="loadData"
-          class="flex-1 p-2 rounded-lg border border-gray-200 text-gray-700"
-        >
-          <option v-for="u in users" :key="u.id" :value="u.id">{{ u.name }} · {{ u.grade }}</option>
-        </select>
+        <div class="relative flex-1">
+          <select v-model="selectedUserId" @change="loadData"
+            class="w-full appearance-none p-2.5 pr-9 rounded-xl border border-gray-200 bg-white text-gray-700 text-sm shadow-sm transition focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400"
+          >
+            <option v-for="u in users" :key="u.id" :value="u.id">{{ u.name }} · {{ u.grade }}</option>
+          </select>
+          <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs">▾</span>
+        </div>
         <button @click="deleteSelected" :disabled="!selectedUserId || deleting"
-          class="px-3 py-2 rounded-lg bg-red-50 text-red-500 text-sm font-medium hover:bg-red-100 transition disabled:opacity-40 whitespace-nowrap"
+          class="px-3 py-2.5 rounded-xl bg-red-50 text-red-500 text-sm font-medium hover:bg-red-100 transition disabled:opacity-40 whitespace-nowrap"
           title="删除当前选中的孩子及其全部数据（不可恢复）"
         >🗑 删除</button>
       </div>

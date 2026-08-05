@@ -27,16 +27,35 @@ const remainingNew = computed(() => {
 })
 const newWordsDone = computed(() => remainingNew.value === 0 || !bankHasMore.value)
 
-onMounted(async () => {
+// 首页当天缓存：SPA 内切回秒开（先用缓存渲染，后台静默刷新），避免"今日新学回顾"等框闪跳
+let homeCache = { uid: null, date: '', stats: null, reviewCount: 0, bankHasMore: true }
+function todayStr() {
+  const d = new Date()
+  const utc8 = new Date(d.getTime() + 8 * 3600 * 1000)
+  return utc8.toISOString().slice(0, 10)
+}
+
+async function loadHome(useCache) {
   const uid = store.user?.id
   if (!uid) { router.push('/'); return }
+  const today = todayStr()
+  const hit = useCache && homeCache.uid === uid && homeCache.date === today && homeCache.stats
+  if (hit) {
+    // 先用缓存渲染（含今日新学回顾框），再后台静默刷新
+    stats.value = homeCache.stats
+    reviewCount.value = homeCache.reviewCount
+    bankHasMore.value = homeCache.bankHasMore
+  }
   try {
     const data = await api.getHome(uid)
-    stats.value = data.stats || {}
-    reviewCount.value = data.dueToday || 0
-    bankHasMore.value = (data.remainingNew ?? 0) > 0
+    homeCache = { uid, date: today, stats: data.stats || {}, reviewCount: data.dueToday || 0, bankHasMore: (data.remainingNew ?? 0) > 0 }
+    stats.value = homeCache.stats
+    reviewCount.value = homeCache.reviewCount
+    bankHasMore.value = homeCache.bankHasMore
   } catch {}
-})
+}
+
+onMounted(() => { loadHome(true) })
 </script>
 
 <template>
