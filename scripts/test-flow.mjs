@@ -226,6 +226,11 @@ console.log('\n--- 删除用户（级联清数据，不留垃圾）---')
   const wordId = words[0].id
   await Q.addBookmark(env, 'u2', wordId)
   await Q.submitSpotCheckResult(env, 'u2', [{ word_id: wordId, result: 1, category: '待复习' }])
+  // 幂等：同 client_id 重复提交不重复插入（网络重试/缓冲补交场景）
+  const first = await Q.submitSpotCheckResult(env, 'u2', [{ word_id: wordId, result: 1, category: '待复习' }], 'u2-session-1')
+  const dup = await Q.submitSpotCheckResult(env, 'u2', [{ word_id: wordId, result: 1, category: '待复习' }], 'u2-session-1')
+  ok(first.already === undefined && dup.already === true, `同 client_id 第一次插入、第二次 already=true`)
+  ok(db.prepare("SELECT COUNT(*) c FROM spot_checks WHERE client_id='u2-session-1'").get().c === 1, `同 client_id 只插 1 条`)
 
   await Q.deleteUser(env, 'u2')
   ok(db.prepare("SELECT COUNT(*) c FROM users WHERE id='u2'").get().c === 0, `users 表已删 u2`)

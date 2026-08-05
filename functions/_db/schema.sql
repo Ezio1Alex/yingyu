@@ -80,8 +80,10 @@ CREATE TABLE IF NOT EXISTS spot_checks (
   total_words INTEGER DEFAULT 20,
   correct     INTEGER DEFAULT 0,
   note        TEXT,
+  client_id   TEXT,                -- 前端抽查会话唯一标识（幂等去重）
   checked_at  TEXT DEFAULT (datetime('now'))
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sc_client ON spot_checks(client_id);
 
 CREATE TABLE IF NOT EXISTS spot_check_items (
   id        INTEGER PRIMARY KEY AUTOINCREMENT,

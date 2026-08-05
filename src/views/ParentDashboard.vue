@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useAppStore } from '../stores/appStore'
 import { api } from '../api/client'
 import { useToast } from '../utils/toast'
+import { pendingStore } from '../utils/pendingStore'
 import SpeakButton from '../components/common/SpeakButton.vue'
 import AppHeader from '../components/common/AppHeader.vue'
 import ProgressCard from '../components/common/ProgressCard.vue'
@@ -47,6 +48,8 @@ const spotCheckIndex = ref(0)
 const spotCheckResults = ref([])
 const spotCheckDone = ref(false)
 const spotCheckResult = ref(null)
+const submitting = ref(false) // 抽查提交中，防网络卡顿重复提交
+const spotClientId = ref('') // 本次抽查会话唯一标识（后端幂等去重）
 const reinforcingIds = ref([]) // 正在标记加强的 word_id 集合
 
 const monthDays = computed(() => {
@@ -64,7 +67,12 @@ const monthDays = computed(() => {
 onMounted(async () => {
   try {
     users.value = await api.getUsers()
-    if (users.value.length > 0) { selectedUserId.value = users.value[0].id; await loadData() }
+    if (users.value.length > 0) {
+      selectedUserId.value = users.value[0].id
+      await loadData()
+      // 补交上次未提交的抽查结果（网络失败/退出后的保险）
+      flushSpotCheck()
+    }
   } catch {}
 })
 
@@ -114,16 +122,24 @@ async function startSpotCheck() {
     spotCheckWords.value = (data.words || []).map(w => ({ ...w, showDef: false }))
     spotCheckIndex.value = 0; spotCheckResults.value = []
     spotCheckDone.value = false; spotCheckResult.value = null
+    spotClientId.value = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8)
     spotCheckActive.value = true
   } catch (e) { toast('发起抽查失败: ' + e.message, 'error') }
 }
 
 function rateSpot(correct) {
-  spotCheckResults.value.push({
-    word_id: spotCheckWords.value[spotCheckIndex.value].id,
-    result: correct ? 1 : 0,
-    category: spotCheckWords.value[spotCheckIndex.value].category || '',
-  })
+  // 提交中或已完成：忽略重复点击（网络卡顿双击/重按会重复提交）
+  if (submitting.value || spotCheckDone.value) return
+  const wid = spotCheckWords.value[spotCheckIndex.value].id
+  // 该词已评过分（如提交失败后重试），不再重复 push，直接进入提交
+  const already = spotCheckResults.value.some(r => r.word_id === wid)
+  if (!already) {
+    spotCheckResults.value.push({
+      word_id: wid,
+      result: correct ? 1 : 0,
+      category: spotCheckWords.value[spotCheckIndex.value].category || '',
+    })
+  }
   if (spotCheckIndex.value < spotCheckWords.value.length - 1) { spotCheckIndex.value++ }
   else { finishSpotCheck() }
 }
@@ -136,10 +152,31 @@ function backStep() {
 }
 
 async function finishSpotCheck() {
+  if (submitting.value || spotCheckDone.value) return
+  submitting.value = true
+  const results = [...spotCheckResults.value]
+  // 本地立即算出结果展示，不等待网络；结果落 localStorage，后台静默提交
+  spotCheckResult.value = { correct: results.filter(r => r.result === 1).length, total: results.length }
+  spotCheckDone.value = true
+  pendingStore.save(selectedUserId.value, 'spotcheck', { client_id: spotClientId.value, items: results })
+  submitting.value = false
+  flushSpotCheck()
+}
+
+// 后台静默提交未完成的抽查结果（成功才删缓冲；失败保留下个触发点重试，
+// 后端按 client_id 幂等，重试/补交不会重复插入）
+async function flushSpotCheck() {
+  const uid = selectedUserId.value
+  if (!uid) return
+  const saved = pendingStore.load(uid, 'spotcheck')
+  if (!saved || !saved.items?.length) return
+  if (submitting.value) return
+  submitting.value = true
   try {
-    const res = await api.submitSpotCheck({ user_id: selectedUserId.value, items: spotCheckResults.value })
-    spotCheckResult.value = res.summary; spotCheckDone.value = true
-  } catch {}
+    await api.submitSpotCheck({ user_id: uid, items: saved.items, client_id: saved.client_id })
+    pendingStore.clear(uid, 'spotcheck')
+  } catch {} // 失败保留，下个触发点自动重试
+  finally { submitting.value = false }
 }
 
 async function doReinforce(wordId) {

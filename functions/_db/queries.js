@@ -412,9 +412,14 @@ export async function startSpotCheck(env, userId, total, mode) {
   }
   return words.slice(0, total)
 }
-export async function submitSpotCheckResult(env, userId, items) {
+export async function submitSpotCheckResult(env, userId, items, clientId) {
   const correct = items.filter(i => i.result === 1).length
-  const result = await DB(env).prepare('INSERT INTO spot_checks (user_id, total_words, correct) VALUES (?, ?, ?)').bind(userId, items.length, correct).run()
+  // 幂等：同一抽查会话重复提交（网络重试/本地缓冲补交）只记录一次
+  if (clientId) {
+    const exist = await DB(env).prepare('SELECT correct, total_words FROM spot_checks WHERE client_id = ?').bind(clientId).first()
+    if (exist) return { correct: exist.correct, total: exist.total_words, already: true }
+  }
+  const result = await DB(env).prepare('INSERT INTO spot_checks (user_id, total_words, correct, client_id) VALUES (?, ?, ?, ?)').bind(userId, items.length, correct, clientId || null).run()
   const checkId = result.meta?.last_row_id
   const stmts = items.map(item => DB(env).prepare('INSERT INTO spot_check_items (check_id, word_id, category, result) VALUES (?, ?, ?, ?)').bind(checkId, item.word_id, item.category || '', item.result))
   if (stmts.length) await DB(env).batch(stmts)

@@ -141,7 +141,7 @@ async function route(method, path, query, body) {
   if (path === '/api/bookmarks' && method === 'POST') return json(await Q.addBookmark(env, body.user_id, body.word_id))
   if (path === '/api/bookmarks' && method === 'DELETE') return json(await Q.removeBookmark(env, body.user_id, body.word_id))
   if (path === '/api/parent/spot-check' && method === 'POST') return json({ words: await Q.startSpotCheck(env, body.user_id, body.total || 10, body.mode || 'normal') })
-  if (path === '/api/parent/spot-check/submit' && method === 'POST') return json({ summary: await Q.submitSpotCheckResult(env, body.user_id, body.items) })
+  if (path === '/api/parent/spot-check/submit' && method === 'POST') return json({ summary: await Q.submitSpotCheckResult(env, body.user_id, body.items, body.client_id) })
   if (path === '/api/parent/reinforce' && method === 'POST') return json(await Q.reinforceWords(env, body.user_id, body.word_ids))
   if (path === '/api/parent/verify-pin' && method === 'POST') return json({ ok: String(body.pin || '') === String(env.PARENT_PIN) })
 
