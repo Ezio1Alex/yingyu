@@ -64,6 +64,10 @@ CREATE TABLE IF NOT EXISTS review_log (
 );
 CREATE INDEX IF NOT EXISTS idx_rl_user_date ON review_log(user_id, date(reviewed_at));
 CREATE INDEX IF NOT EXISTS idx_rl_word      ON review_log(user_id, word_id);
+-- 覆盖索引：让「今天学过几个词」这类带 date() 的聚合能直接 seek 到当天那几行。
+-- 只有 idx_rl_word(user_id, word_id) 时，SQLite 只能按 user_id 定位、然后扫该用户**全部**日志来算
+-- date(reviewed_at)，成本随学习历史线性增长（背满一年约 1.5 万行/次，502 免费额度下 ~166 次就没了）。
+CREATE INDEX IF NOT EXISTS idx_rl_user_date_word ON review_log(user_id, date(reviewed_at), word_id);
 
 -- ===== 收藏 =====
 CREATE TABLE IF NOT EXISTS bookmarks (

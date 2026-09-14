@@ -8,24 +8,26 @@ const router = useRouter()
 const store = useAppStore()
 
 const pin = ref('')
-const error = ref(false)
+const errorMsg = ref('')
 const verifying = ref(false)
 
 // PIN 由后端校验（env.PARENT_PIN），前端不持有真实 PIN
 async function verify() {
-  error.value = false
+  errorMsg.value = ''
   if (!pin.value || verifying.value) return
   verifying.value = true
   try {
     const res = await api.verifyParentPin(pin.value)
     if (res.ok) {
-      store.setPinVerified(true)
+      // 把 PIN 留在内存里：家长端删除用户等破坏性操作要带着它提交
+      store.setPinVerified(true, pin.value)
       router.push('/parent/dashboard')
     } else {
-      error.value = true
+      errorMsg.value = 'PIN 码错误，请重试'
     }
-  } catch {
-    error.value = true
+  } catch (e) {
+    // 被限流/断网时要说清楚是网络问题：一律报「PIN 码错误」会让家长以为密码记错了
+    errorMsg.value = e.message
   } finally {
     verifying.value = false
   }
@@ -49,7 +51,7 @@ async function verify() {
         @keyup.enter="verify"
       />
 
-      <p v-if="error" class="text-red-400 text-sm mt-2 text-center">PIN 码错误，请重试</p>
+      <p v-if="errorMsg" class="text-red-400 text-sm mt-2 text-center">{{ errorMsg }}</p>
 
       <button
         @click="verify"

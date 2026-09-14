@@ -16,17 +16,25 @@ const users = ref([])
 const showCreate = ref(false)
 const loading = ref(true)
 const creating = ref(false) // 防双击/网络重试重复创建用户
+const loadError = ref('') // 拉取用户列表失败（限流/断网）
 
-onMounted(async () => {
+async function loadUsers() {
+  loading.value = true
+  loadError.value = ''
   try {
     users.value = await api.getUsers()
+    // 只有「确实一个用户都没有」才进创建流程
     if (users.value.length === 0) showCreate.value = true
-  } catch {
-    showCreate.value = true
+  } catch (e) {
+    // 拉不到列表就用创建表单顶上是不对的：账号可能好好存在着，用户会以为数据没了。
+    // 这里一律显示错误 + 重试入口，让用户自己决定。
+    loadError.value = e.message
   } finally {
     loading.value = false
   }
-})
+}
+
+onMounted(loadUsers)
 
 function selectUser(u) {
   store.setUser(u)
@@ -85,6 +93,16 @@ async function createUser() {
             🔒 家长督导
           </router-link>
         </div>
+      </div>
+
+      <!-- 拉取失败（被限流/断网）：不能用创建表单顶上，给重试入口 -->
+      <div v-else-if="loadError" class="text-center py-4 space-y-4">
+        <div class="text-4xl">😵</div>
+        <p class="text-sm text-gray-500">{{ loadError }}</p>
+        <button
+          @click="loadUsers"
+          class="w-full py-3 bg-indigo-500 text-white rounded-xl font-medium hover:bg-indigo-600 transition"
+        >🔄 重试</button>
       </div>
 
       <!-- 创建新用户 -->

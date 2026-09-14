@@ -152,7 +152,7 @@ export async function getTodayNewWords(env, userId) {
 
 // ===== 统计 =====
 // 词库总词数：惰性写入 banks 表（部署后首次调用自动从 words 统计一次，之后不再扫 words 全表）
-async function getBankId(env, userId) {
+export async function getBankId(env, userId) {
   const u = await DB(env).prepare('SELECT bank_id FROM users WHERE id = ?').bind(userId).first()
   return u?.bank_id || 2
 }
@@ -381,21 +381,14 @@ export async function getWordState(env, userId) {
   }
 }
 
-// 一次全量拉取用户词库（含学习状态 + 收藏状态），前端本地筛选
-export async function getBankWords(env, userId) {
-  return DB(env).prepare(`
-    SELECT w.*,
-      CASE WHEN p.stage = 'known' THEN 'mastered'
-           WHEN p.word_id IS NOT NULL THEN 'learning'
-           ELSE 'new' END as status,
-      CASE WHEN p.stage = 'known' THEN 1 ELSE 0 END as mastered,
-      CASE WHEN b.word_id IS NOT NULL THEN 1 ELSE 0 END as bookmarked
-    FROM words w
-    LEFT JOIN word_learning p ON w.id = p.word_id AND p.user_id = ?
-    LEFT JOIN bookmarks b ON w.id = b.word_id AND b.user_id = ?
-    WHERE w.bank_id = (SELECT bank_id FROM users WHERE id = ?)
-    ORDER BY w.id
-  `).bind(userId, userId, userId).all().then(r => r.results)
+// 一次全量拉取整个词库。
+// 按 bank_id 取，**不带任何用户维度的字段**：前端 bankStore 的 merge() 会用 /api/words/state 的结果
+// 重算 status/mastered/bookmarked，服务端 join 出来的那几列本来就会被丢掉。
+// 少了两个 LEFT JOIN 和 users 子查询，D1 读取行数直接降下来；
+// 更重要的是这样就能按 bank_id 做边缘缓存 —— 全站只有 2 个缓存条目、与 user_id 无关，
+// 攻击者拿随机 user_id 刷也只是命中缓存，产生 0 次 D1 读。
+export async function getBankWords(env, bankId) {
+  return DB(env).prepare('SELECT * FROM words WHERE bank_id = ? ORDER BY id').bind(bankId).all().then(r => r.results)
 }
 
 // ===== 家长端 =====

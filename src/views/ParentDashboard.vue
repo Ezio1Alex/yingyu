@@ -209,7 +209,7 @@ function deleteSelected() {
 async function doDeleteUser(u) {
   deleting.value = true
   try {
-    await api.deleteUser(u.id)
+    await api.deleteUser(u.id, store.parentPin)
     users.value = await api.getUsers()
     // 若删除的是当前选中，切到剩余第一个
     if (selectedUserId.value === u.id) {

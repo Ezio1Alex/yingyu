@@ -1,14 +1,44 @@
 const API_BASE = '/api'
 
+// 可选的共享密钥：只有构建时设了 VITE_APP_KEY 才发送（后端要同时打开 REQUIRE_APP_KEY 才会校验）
+const APP_KEY = import.meta.env.VITE_APP_KEY || ''
+
+// 带上状态码的错误：调用方需要区分「被限流了，等会儿再来」和「真的出错了」
+export class ApiError extends Error {
+  constructor(message, status = 0, retryAfter = 0) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.retryAfter = retryAfter
+  }
+}
+
+// 限流(429)或压根没连上 —— 这类失败是暂时的，重试就好，不该当成「数据出错/没有数据」处理
+export function isRetryable(e) {
+  return e instanceof ApiError && (e.status === 429 || e.status === 0)
+}
+
 async function request(path, options = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
-    ...options,
-  })
+  const headers = { 'Content-Type': 'application/json', ...options.headers }
+  if (APP_KEY) headers['X-App-Key'] = APP_KEY
+
+  let res
+  try {
+    res = await fetch(`${API_BASE}${path}`, { ...options, headers })
+  } catch {
+    throw new ApiError('网络连接失败，请检查网络后重试', 0, 0)
+  }
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || `请求失败: ${res.status}`)
+    // Retry-After 由后端的限流中间件给出
+    const retryAfter = parseInt(res.headers.get('Retry-After') || '0', 10) || 0
+    const message = res.status === 429
+      ? `请求过于频繁，请等 ${retryAfter || 60} 秒后再试`
+      : (err.error || `请求失败: ${res.status}`)
+    throw new ApiError(message, res.status, retryAfter)
   }
+
   return res.json()
 }
 
@@ -16,7 +46,8 @@ export const api = {
   // 用户
   getUsers: () => request('/users'),
   createUser: (data) => request('/users', { method: 'POST', body: JSON.stringify(data) }),
-  deleteUser: (userId) => request('/users', { method: 'DELETE', body: JSON.stringify({ user_id: userId }) }),
+  // 删除会级联清空该用户的全部学习数据，需要带家长 PIN
+  deleteUser: (userId, pin) => request('/users', { method: 'DELETE', body: JSON.stringify({ user_id: userId, pin }) }),
   updateUserBank: (data) => request('/users/bank', { method: 'PUT', body: JSON.stringify(data) }),
 
   // 今日复习
@@ -40,8 +71,9 @@ export const api = {
   // 统计（学习报告页用）
   getStats: (userId) => request(`/stats?user_id=${userId}`),
 
-  // 词库（全量拉取，本地搜索/筛选/收藏）
-  getWords: (userId) => request(`/words?user_id=${userId}`),
+  // 词库（全量拉取，本地搜索/筛选/收藏）。传 bank_id 而不是 user_id：
+  // 词库内容与用户无关，按 bank 拉取才能命中服务端边缘缓存
+  getWords: (bankId) => request(`/words?bank_id=${bankId}`),
   // 学习状态小接口（已学/收藏列表，前端合并本地词条缓存）
   getWordState: (userId) => request(`/words/state?user_id=${userId}`),
 

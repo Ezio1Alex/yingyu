@@ -5,6 +5,24 @@ import { api } from '../api/client'
 // 词库词条数据版本：以后更新词库内容（改释义/加词）时 +1，所有客户端会自动重拉缓存
 const VERSION = 1
 const lsKey = (bankId) => `vocab_words_${bankId}`
+const stateLsKey = (userId) => `vocab_state_${userId}`
+
+// 学习状态（已学/收藏集合）：这个接口在 load() 里是硬依赖、没有别的兜底，
+// 一旦失败整个词库页会空白 —— 所以落一份 localStorage，失败时退回上次拿到的状态。
+async function fetchState(userId) {
+  const key = stateLsKey(userId)
+  try {
+    const st = await api.getWordState(userId)
+    try { localStorage.setItem(key, JSON.stringify(st)) } catch {}
+    return st
+  } catch (e) {
+    try {
+      const raw = localStorage.getItem(key)
+      if (raw) return JSON.parse(raw)
+    } catch {}
+    throw e // 连缓存都没有，才是真的没救了
+  }
+}
 
 // 合并词条 + 云端状态：status 按最新已学集合重算，保证缓存里的旧状态被覆盖
 function merge(base, st) {
@@ -33,7 +51,7 @@ export const useBankStore = defineStore('bank', () => {
   //   3. 无缓存 → 全量拉取兜底并落 localStorage
   async function load(userId, targetBankId) {
     if (loaded.value && bankId.value === targetBankId) return words.value
-    const freshState = await api.getWordState(userId)
+    const freshState = await fetchState(userId)
     state.value = freshState
 
     let base = null
@@ -45,7 +63,7 @@ export const useBankStore = defineStore('bank', () => {
       }
     } catch {}
     if (!base || !base.length) {
-      const data = await api.getWords(userId)
+      const data = await api.getWords(targetBankId)
       base = data.words || []
       try {
         localStorage.setItem(lsKey(targetBankId), JSON.stringify({ version: VERSION, words: base }))

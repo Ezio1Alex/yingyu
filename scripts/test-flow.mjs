@@ -215,10 +215,14 @@ console.log('\n--- 家长按月看板 / 按天详情 ---')
 
 console.log('\n--- 词库全量查询 ---')
 {
-  const words = await Q.getBankWords(env, 'u1')
-  ok(words.length === 10, `全量拉取 ${words.length} 词`)
-  ok(words.every(w => w.status === 'new' || w.status === 'learning' || w.status === 'mastered'), `每条都有 status`)
-  ok(words.every(w => typeof w.bookmarked === 'number'), `每条都有 bookmarked`)
+  // 按 bank_id 拉取（不再是 user_id）：词库内容是只读语料、与用户无关，
+  // 这样服务端才能按 bank 做边缘缓存（全站只有 2 个缓存条目，攻击者拿随机 user_id 刷也命中缓存）。
+  // status / bookmarked 由前端 bankStore.merge() 用 /api/words/state 的结果重算，这个端点不再返回。
+  const words = await Q.getBankWords(env, 1)
+  ok(words.length === 10, `按 bank_id 全量拉取 ${words.length} 词`)
+  ok(words.every(w => w.word && w.definition), `每条都有 word/definition`)
+  ok(words.every(w => w.status === undefined && w.bookmarked === undefined), `不再返回用户维度的 status/bookmarked`)
+  ok((await Q.getBankWords(env, 2)).length === 0, `bank_id=2 无词`)
 }
 
 console.log('\n--- 删除用户（级联清数据，不留垃圾）---')
