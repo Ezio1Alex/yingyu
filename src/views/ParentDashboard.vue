@@ -5,6 +5,7 @@ import { useAppStore } from '../stores/appStore'
 import { api } from '../api/client'
 import { useToast } from '../utils/toast'
 import { pendingStore } from '../utils/pendingStore'
+import { groupSpotCheckHistory, groupTimeLabel } from '../utils/spotCheckHistory'
 import SpeakButton from '../components/common/SpeakButton.vue'
 import AppHeader from '../components/common/AppHeader.vue'
 import ProgressCard from '../components/common/ProgressCard.vue'
@@ -72,6 +73,9 @@ const monthDays = computed(() => {
   return weeks
 })
 
+// 抽查历史按「一次连着的抽查」合并展示（规则见 utils/spotCheckHistory.js）
+const historyGroups = computed(() => groupSpotCheckHistory(history.value))
+
 onMounted(async () => {
   try {
     users.value = await api.getUsers()
@@ -125,9 +129,26 @@ async function openDay(d) {
 
 async function startSpotCheck() {
   try {
-    const total = spotMode.value === 'today_new' ? 999 : spotCount.value
-    const data = await api.startSpotCheck(selectedUserId.value, total, spotMode.value)
-    spotCheckWords.value = (data.words || []).map(w => ({ ...w, showDef: false }))
+    const wanted = spotMode.value === 'today_new' ? 999 : spotCount.value
+    const data = await api.startSpotCheck(selectedUserId.value, wanted, spotMode.value)
+    const words = data.words || []
+
+    // 一个词都没有：不要进到「第 1/0 题」那张空白卡片的死路里（只能靠返回键退出）
+    if (words.length === 0) {
+      toast(spotMode.value === 'today_new'
+        ? '今天还没有新学的词，暂时没法抽查'
+        : '当前没有待复习的词，暂时没法抽查')
+      return
+    }
+    // 候选池不够：明确告诉家长，不要静默给个短会话 ——
+    // 以前家长看到「第 1/1 题」以为坏了，反复重试，每次都写一条抽查历史，把记录刷成一堆碎片
+    if (spotMode.value === 'normal' && words.length < spotCount.value) {
+      const ok = window.confirm(
+        `待复习的词只剩 ${words.length} 个（你选了 ${spotCount.value} 个）。\n是否就用这 ${words.length} 个开始抽查？`)
+      if (!ok) return
+    }
+
+    spotCheckWords.value = words.map(w => ({ ...w, showDef: false }))
     spotCheckIndex.value = 0; spotCheckResults.value = []
     spotCheckDone.value = false; spotCheckResult.value = null
     spotClientId.value = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8)
@@ -340,17 +361,18 @@ function getResult(wordId) {
         <h2 class="font-medium text-gray-800 mb-3">📋 抽查历史 <span class="text-xs text-gray-400 font-normal">{{ monthTitle }}</span></h2>
         <div v-if="history.length === 0" class="text-sm text-gray-400 py-2">当月暂无记录</div>
         <div v-else class="space-y-2">
-          <div v-for="h in history" :key="h.id"
+          <div v-for="g in historyGroups" :key="g.id"
             class="flex justify-between items-center text-sm py-1.5 border-b border-gray-50 last:border-0"
           >
             <div class="text-gray-500 text-xs">
-              <div>{{ h.checked_at?.split(' ')[0] }}</div>
-              <div class="text-gray-300">{{ h.checked_at?.split(' ')[1]?.slice(0,5) }}</div>
+              <div>{{ g.day }}</div>
+              <div class="text-gray-300">{{ groupTimeLabel(g) }}</div>
+              <div v-if="g.n > 1" class="text-gray-300">共 {{ g.n }} 次</div>
             </div>
             <div class="text-right">
-              <div class="text-gray-700 font-medium">{{ h.correct }}/{{ h.total_words }} 正确</div>
-              <div class="text-xs" :class="h.correct >= h.total_words * 0.7 ? 'text-emerald-500' : 'text-red-400'">
-                {{ h.total_words > 0 ? Math.round(h.correct/h.total_words*100) : 0 }}%
+              <div class="text-gray-700 font-medium">{{ g.correct }}/{{ g.total }} 正确</div>
+              <div class="text-xs" :class="g.correct >= g.total * 0.7 ? 'text-emerald-500' : 'text-red-400'">
+                {{ g.total > 0 ? Math.round(g.correct/g.total*100) : 0 }}%
               </div>
             </div>
           </div>

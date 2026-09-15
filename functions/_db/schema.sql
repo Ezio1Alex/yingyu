@@ -1,3 +1,20 @@
+-- ===== 时间约定（重要）=====
+-- 所有业务时间列统一存**东八区**墙上时间（由 functions/_db/time.js 的 nowCN() 写入，
+-- 或 schema 里用 datetime('now', '+8 hours') 作默认值）。
+-- 这样直接 date(col) / strftime('%H:%M', col) 就是中国本地日期和时间，查询里不需要再 +8 小时。
+-- ⚠️ 历史坑：spot_checks.checked_at 曾经用 datetime('now') 存 UTC、查询时再 +8 小时转回来，
+--    与其它列约定不一致，极易漏掉转换。2026-09-15 已迁移并统一，见文件末尾的说明。
+
+-- ===== 迁移记录 =====
+-- 一次性数据迁移的幂等标记：迁移 SQL 用
+--   UPDATE ... WHERE (SELECT COUNT(*) FROM schema_migrations WHERE id='xxx') = 0;
+--   INSERT OR IGNORE INTO schema_migrations (id, applied_at) VALUES ('xxx', datetime('now','+8 hours'));
+-- 的顺序执行，重复跑同一份迁移脚本不会二次生效。
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  id         TEXT PRIMARY KEY,
+  applied_at TEXT NOT NULL
+);
+
 -- ===== 词库 =====
 CREATE TABLE IF NOT EXISTS words (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,7 +102,7 @@ CREATE TABLE IF NOT EXISTS spot_checks (
   correct     INTEGER DEFAULT 0,
   note        TEXT,
   client_id   TEXT,                -- 前端抽查会话唯一标识（幂等去重）
-  checked_at  TEXT DEFAULT (datetime('now'))
+  checked_at  TEXT DEFAULT (datetime('now', '+8 hours'))  -- 东八区；写入时由代码显式给 nowCN()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sc_client ON spot_checks(client_id);
 

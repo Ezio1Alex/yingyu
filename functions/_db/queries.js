@@ -312,8 +312,8 @@ export async function getParentDashboard(env, userId, monthStr) {
     streakStmt(env, userId),
     // 当月薄弱词：只统计当月答错的 recall
     DB(env).prepare(`SELECT w.word, w.definition, COUNT(*) as errors FROM review_log r JOIN words w ON w.id = r.word_id WHERE r.user_id = ? AND r.correct = 0 AND r.type = 'recall' AND date(r.reviewed_at) >= ? AND date(r.reviewed_at) <= ? GROUP BY r.word_id ORDER BY errors DESC LIMIT 10`).bind(userId, startDateStr, endDateStr),
-    // 当月抽查历史（checked_at 是 UTC，转东八区再按日比较）
-    DB(env).prepare(`SELECT id, user_id, total_words, correct, note, datetime(checked_at, '+8 hours') as checked_at FROM spot_checks WHERE user_id = ? AND date(checked_at, '+8 hours') >= ? AND date(checked_at, '+8 hours') <= ? ORDER BY checked_at DESC LIMIT 50`).bind(userId, startDateStr, endDateStr),
+    // 当月抽查历史（checked_at 与其它时间列一样是东八区，直接按日比较）
+    DB(env).prepare(`SELECT id, user_id, total_words, correct, note, checked_at FROM spot_checks WHERE user_id = ? AND date(checked_at) >= ? AND date(checked_at) <= ? ORDER BY checked_at DESC LIMIT 50`).bind(userId, startDateStr, endDateStr),
     DB(env).prepare(`SELECT date(reviewed_at) as d, COUNT(DISTINCT word_id) as cnt FROM review_log WHERE user_id = ? AND date(reviewed_at) >= ? AND date(reviewed_at) <= ? GROUP BY date(reviewed_at)`).bind(userId, startDateStr, endDateStr),
   ])
   const streak = calcStreak(streakR.results.map(r => r.d))
@@ -340,7 +340,7 @@ export async function getDayDetail(env, userId, dateStr) {
     DB(env).prepare(`SELECT COUNT(DISTINCT word_id) as c FROM review_log WHERE user_id = ? AND type = 'learning' AND date(reviewed_at) = ?`).bind(userId, dateStr),
     DB(env).prepare(`SELECT COUNT(DISTINCT word_id) as total, COUNT(DISTINCT CASE WHEN correct = 1 THEN word_id END) as correct FROM review_log WHERE user_id = ? AND type = 'recall' AND date(reviewed_at) = ?`).bind(userId, dateStr),
     DB(env).prepare(`SELECT w.word, w.definition, COUNT(*) as errors FROM review_log r JOIN words w ON w.id = r.word_id WHERE r.user_id = ? AND r.correct = 0 AND r.type = 'recall' AND date(r.reviewed_at) = ? GROUP BY r.word_id ORDER BY errors DESC LIMIT 5`).bind(userId, dateStr),
-    DB(env).prepare(`SELECT id, total_words, correct, datetime(checked_at, '+8 hours') as checked_at FROM spot_checks WHERE user_id = ? AND date(checked_at, '+8 hours') = ? ORDER BY checked_at DESC`).bind(userId, dateStr),
+    DB(env).prepare(`SELECT id, total_words, correct, checked_at FROM spot_checks WHERE user_id = ? AND date(checked_at) = ? ORDER BY checked_at DESC`).bind(userId, dateStr),
   ])
   return {
     date: dateStr,
@@ -392,10 +392,15 @@ export async function getBankWords(env, bankId) {
 }
 
 // ===== 家长端 =====
+// 家长抽查出题。返回 { words, candidates }：
+//   candidates = 候选池实际有多少词（**切片前**）。
+//   以前是静默 `slice(0, total)` —— 家长要 10 个、池子里只有 1 个就只出 1 题，前端毫不知情，
+//   家长看到「第 1/1 题」以为坏了，反复重试，每次都写一条抽查历史，把记录刷成一堆碎片。
 export async function startSpotCheck(env, userId, total, mode) {
   const today = todayCN()
   if (mode === 'today_new') {
-    return await DB(env).prepare(`SELECT DISTINCT w.*, '今日新学' as category FROM review_log r JOIN words w ON w.id = r.word_id WHERE r.user_id = ? AND r.type = 'learning' AND date(r.reviewed_at) = ? ORDER BY RANDOM()`).bind(userId, today).all().then(r => r.results)
+    const words = await DB(env).prepare(`SELECT DISTINCT w.*, '今日新学' as category FROM review_log r JOIN words w ON w.id = r.word_id WHERE r.user_id = ? AND r.type = 'learning' AND date(r.reviewed_at) = ? ORDER BY RANDOM()`).bind(userId, today).all().then(r => r.results)
+    return { words, candidates: words.length }
   }
   // 待复习池：next_review <= today
   let words = await DB(env).prepare(`SELECT DISTINCT w.*, '待复习' as category FROM words w INNER JOIN word_learning p ON w.id = p.word_id AND p.user_id = ? WHERE p.next_review <= ? ORDER BY RANDOM()`).bind(userId, today).all().then(r => r.results)
@@ -403,7 +408,7 @@ export async function startSpotCheck(env, userId, total, mode) {
   if (words.length === 0) {
     words = await DB(env).prepare(`SELECT DISTINCT w.*, '今日已复习' as category FROM review_log r JOIN words w ON w.id = r.word_id WHERE r.user_id = ? AND r.type = 'recall' AND date(r.reviewed_at) = ? ORDER BY RANDOM()`).bind(userId, today).all().then(r => r.results)
   }
-  return words.slice(0, total)
+  return { words: words.slice(0, total), candidates: words.length }
 }
 export async function submitSpotCheckResult(env, userId, items, clientId) {
   const correct = items.filter(i => i.result === 1).length
@@ -412,7 +417,10 @@ export async function submitSpotCheckResult(env, userId, items, clientId) {
     const exist = await DB(env).prepare('SELECT correct, total_words FROM spot_checks WHERE client_id = ?').bind(clientId).first()
     if (exist) return { correct: exist.correct, total: exist.total_words, already: true }
   }
-  const result = await DB(env).prepare('INSERT INTO spot_checks (user_id, total_words, correct, client_id) VALUES (?, ?, ?, ?)').bind(userId, items.length, correct, clientId || null).run()
+  // checked_at 显式写东八区（nowCN），与 review_log.reviewed_at / word_learning.* 统一。
+  // 以前靠 schema 默认的 datetime('now')（UTC），查询时再 datetime(checked_at,'+8 hours') 转回来 ——
+  // 同一个库里两套时区约定混用，极易踩坑（改查询时漏掉转换就会差 8 小时）。
+  const result = await DB(env).prepare('INSERT INTO spot_checks (user_id, total_words, correct, client_id, checked_at) VALUES (?, ?, ?, ?, ?)').bind(userId, items.length, correct, clientId || null, nowCN()).run()
   const checkId = result.meta?.last_row_id
   const stmts = items.map(item => DB(env).prepare('INSERT INTO spot_check_items (check_id, word_id, category, result) VALUES (?, ?, ?, ?)').bind(checkId, item.word_id, item.category || '', item.result))
   if (stmts.length) await DB(env).batch(stmts)

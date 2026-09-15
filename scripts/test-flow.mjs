@@ -42,6 +42,7 @@ const env = {
 
 const Q = await import(pathToFileURL(join(process.cwd(), 'functions/_db/queries.js')))
 const sm2mod = await import(pathToFileURL(join(process.cwd(), 'functions/_srs/sm2.js')))
+const { groupSpotCheckHistory, groupTimeLabel } = await import(pathToFileURL(join(process.cwd(), 'src/utils/spotCheckHistory.js')))
 
 let pass = 0, fail = 0
 function ok(cond, msg) {
@@ -139,8 +140,19 @@ console.log('\n--- 批量复习 submitReviews ---')
 console.log('\n--- 抽查回退（待复习池空 → 今天已复习词）---')
 {
   // 此时所有到期词都已复习（next_review 推到明天），待复习池为空
-  const sc = await Q.startSpotCheck(env, 'u1', 10, 'normal')
+  const { words: sc, candidates } = await Q.startSpotCheck(env, 'u1', 10, 'normal')
   ok(sc.length === 2 && sc.every(w => w.category === '今日已复习'), `抽查回退: ${sc.map(w => w.word).join(',')} (${sc.length}词)`)
+  ok(candidates === 2, `candidates 反映候选池实际词数, 实际 ${candidates}`)
+}
+
+console.log('\n--- 抽查候选数（池子不够时不再静默给短会话）---')
+{
+  // 池子里只有 2 个词，却要 10 个：旧行为是静默返回 2 个，前端毫不知情，
+  // 家长看到「第 1/10 题」以外只有 2 题就以为坏了，反复重试把历史刷成碎片。
+  // 现在后端把候选数一并返回，前端据此提示家长。
+  const { words, candidates, requested } = { ...(await Q.startSpotCheck(env, 'u1', 10, 'normal')), requested: 10 }
+  ok(words.length === 2 && candidates === 2 && requested === 10,
+    `要 ${requested} 个只给 ${words.length} 个, candidates=${candidates}`)
 }
 
 console.log('\n--- 统计聚合 ---')
@@ -187,10 +199,15 @@ console.log('\n--- 收藏/加强/抽查 ---')
   const w = db.prepare('SELECT * FROM word_learning WHERE user_id=? AND word_id=?').get('u1', learnId)
   ok(w.stage === 'learning' && w.gap === 1 && w.reps === 0, `加强后重置为 learning`)
 
-  const sc = await Q.startSpotCheck(env, 'u1', 10, 'normal')
+  const { words: sc } = await Q.startSpotCheck(env, 'u1', 10, 'normal')
   ok(sc.length >= 1, `抽查可出题, 实际 ${sc.length}`)
   const res = await Q.submitSpotCheckResult(env, 'u1', [{ word_id: learnId, result: 1, category: '待复习' }])
   ok(res.correct === 1 && res.total === 1, `抽查提交`)
+  // checked_at 现在显式写东八区（nowCN），与 review_log.reviewed_at 统一
+  const scRow = db.prepare('SELECT checked_at FROM spot_checks ORDER BY id DESC LIMIT 1').get()
+  const cnNow = new Date(Date.now() + 8 * 3600e3).toISOString().replace('T', ' ').slice(0, 19)
+  ok(Math.abs(Date.parse(scRow.checked_at.replace(' ', 'T') + 'Z') - Date.parse(cnNow.replace(' ', 'T') + 'Z')) < 60000,
+    `checked_at 写的是东八区, 实际 ${scRow.checked_at} (东八区现在 ${cnNow})`)
   const dash = await Q.getParentDashboard(env, 'u1')
   ok(dash.history.length === 1, `抽查历史 1 条`)
 }
@@ -248,6 +265,34 @@ console.log('\n--- 删除用户（级联清数据，不留垃圾）---')
   const orphan = db.prepare('SELECT COUNT(*) c FROM spot_check_items WHERE check_id NOT IN (SELECT id FROM spot_checks)').get().c
   ok(orphan === 0, `spot_check_items 无孤儿（级联删除）`)
   ok(db.prepare("SELECT COUNT(*) c FROM users WHERE id='u1'").get().c === 1, `u1 不受影响`)
+}
+
+console.log('\n--- 抽查历史合并展示 ---')
+{
+  // 后端一条记录 = 一次「点了开始抽查」。家长在候选池不够时会反复重试，
+  // 产生 20:40 连着四条「1/1」这类碎片，把有意义的记录淹掉。前端按「同日 + 间隔 < 5 分钟」合并。
+  const hist = [
+    { id: 6, checked_at: '2026-09-13 20:45:12', total_words: 5,  correct: 3 },
+    { id: 5, checked_at: '2026-09-13 20:43:50', total_words: 10, correct: 5 },
+    { id: 4, checked_at: '2026-09-13 20:41:34', total_words: 1,  correct: 1 },
+    { id: 3, checked_at: '2026-09-13 20:40:25', total_words: 1,  correct: 1 },
+    { id: 2, checked_at: '2026-09-13 20:39:24', total_words: 5,  correct: 4 },
+    // 隔了 6 小时 → 另起一组
+    { id: 1, checked_at: '2026-09-13 14:02:00', total_words: 20, correct: 20 },
+  ]
+  const g = groupSpotCheckHistory(hist)
+  ok(g.length === 2, `6 条碎片合并成 2 组, 实际 ${g.length}`)
+  ok(g[0].n === 5 && g[0].total === 22 && g[0].correct === 14, `第一组 5 次 / 22 词 / 14 对, 实际 ${g[0].n}/${g[0].total}/${g[0].correct}`)
+  ok(groupTimeLabel(g[0]) === '20:39–20:45', `时间区间标签, 实际 ${groupTimeLabel(g[0])}`)
+  ok(g[1].n === 1 && groupTimeLabel(g[1]) === '14:02', `单条不合并、只显示时刻, 实际 ${g[1].n}/${groupTimeLabel(g[1])}`)
+  const sum = g.reduce((s, x) => s + x.total, 0)
+  ok(sum === hist.reduce((s, h) => s + h.total_words, 0), `合并不丢数据, 合计 ${sum}`)
+  // 跨天不合并（哪怕只隔 1 分钟）
+  const crossDay = groupSpotCheckHistory([
+    { id: 2, checked_at: '2026-09-14 00:01:00', total_words: 5, correct: 5 },
+    { id: 1, checked_at: '2026-09-13 23:59:00', total_words: 5, correct: 5 },
+  ])
+  ok(crossDay.length === 2, `跨天不合并, 实际 ${crossDay.length} 组`)
 }
 
 // 清理
